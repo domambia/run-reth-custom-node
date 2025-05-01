@@ -1,85 +1,73 @@
 #!/bin/bash
 
 # ======================================================================
-# Reth Ethereum Node Runner Script
+# Geth Ethereum Node and Lighthouse Consensus Client Runner Script
 # ======================================================================
-# This script runs a Reth node on Ethereum mainnet with HTTP RPC and
-# WebSocket support. Customize the parameters below as needed.
-# 
-# By default, this runs as an archive node. To run as a full node
-# (which saves disk space), uncomment the --full flag option.
+# This script runs a Geth node on Ethereum mainnet and a Lighthouse consensus client.
+# Customize the parameters below as needed.
+# ======================================================================
 
-# ======================================================================
 # Configuration Variables - Customize these as needed
 # ======================================================================
 
-# Node Configuration
-DATA_DIR="$HOME/.local/share/reth"
-CHAIN="mainnet"  # Options: mainnet, sepolia, holesky, hoodi, dev
-NODE_TYPE="archive"  # Options: archive, full
+# Geth Configuration
+GETH_DATA_DIR="/root/geth"
+GETH_LOG_DIR="/root/geth-logs"
+GETH_CHAIN="mainnet"
+GETH_NODE_TYPE="full"  # Options: full, archive
 
-# RPC Configuration
 ENABLE_HTTP="true"
-HTTP_ADDR="127.0.0.1"  # Use 0.0.0.0 to allow external connections
+HTTP_ADDR="127.0.0.1"
 HTTP_PORT="8545"
-HTTP_API="eth,net,web3,txpool,debug"  # Available: admin, debug, eth, net, trace, txpool, web3, rpc, etc.
-HTTP_CORSDOMAIN="*"  # Use "*" to allow all origins or a comma-separated list
+HTTP_API="eth,net,web3,txpool,debug"
+HTTP_CORSDOMAIN="*"
 
-# WebSocket Configuration
 ENABLE_WS="true"
-WS_ADDR="127.0.0.1"  # Use 0.0.0.0 to allow external connections
+WS_ADDR="127.0.0.1"
 WS_PORT="8546"
 WS_API="eth,net,web3,txpool"
-WS_ORIGINS="*"  # Use "*" to allow all origins or a comma-separated list
+WS_ORIGINS="*"
 
-# Auth RPC Configuration (for Consensus Layer connection)
 AUTH_ADDR="127.0.0.1"
 AUTH_PORT="8551"
-JWT_SECRET="$DATA_DIR/$CHAIN/jwt.hex"
+JWT_SECRET="$GETH_DATA_DIR/$GETH_CHAIN/jwt.hex"
 
-# Logging Configuration
-LOG_LEVEL="info"  # Options: error, warn, info, debug, trace
+LOG_LEVEL="3"  # 0 = panic, 1 = fatal, 2 = error, 3 = warn, 4 = info, 5 = debug, 6 = detail, 7 = trace
 
-# P2P Network Configuration
 DISCOVERY_PORT="30303"
-MAX_PEERS="50"  # Total peers will be split between inbound and outbound
+MAX_PEERS="50"
+
+# Lighthouse Configuration
+LIGHTHOUSE_DATA_DIR="/root/lighthouse"
+LIGHTHOUSE_LOG_DIR="/root/lighthouse-logs"
 
 # ======================================================================
 # Functions
 # ======================================================================
 
-# Function to generate JWT secret if it doesn't exist
 generate_jwt_secret() {
     if [ ! -f "$JWT_SECRET" ]; then
         echo "Generating JWT secret at $JWT_SECRET"
         mkdir -p "$(dirname "$JWT_SECRET")"
-        
         if command -v openssl &> /dev/null; then
-            # Generate 32 random bytes and convert to hex
             openssl rand -hex 32 > "$JWT_SECRET"
         else
-            # Fallback method if openssl is not available
             head -c 32 /dev/urandom | xxd -p -c 32 > "$JWT_SECRET"
         fi
-        
-        # Set permissions to be readable only by owner
         chmod 600 "$JWT_SECRET"
-        
         echo "JWT secret generated successfully"
     fi
 }
 
-# Function to create systemd service files
 create_systemd_service() {
-    local service_name="reth-node"
+    local service_name="geth-node"
     local user=$(whoami)
     local script_path=$(readlink -f "$0")
     local script_dir=$(dirname "$script_path")
-    
-    # Create systemd service file
+
     cat > "${script_dir}/${service_name}.service" <<EOL
 [Unit]
-Description=Reth Ethereum Node
+Description=Geth Ethereum Node
 After=network.target
 Wants=network-online.target
 
@@ -95,35 +83,24 @@ WorkingDirectory=${script_dir}
 [Install]
 WantedBy=multi-user.target
 EOL
-    
-    echo "========================================================================"
-    echo "Systemd service file created at ${script_dir}/${service_name}.service"
-    echo ""
-    echo "To install the service, run:"
+
+    echo "Systemd service created: ${script_dir}/${service_name}.service"
+    echo "To enable it:"
     echo "  sudo cp ${script_dir}/${service_name}.service /etc/systemd/system/"
     echo "  sudo systemctl daemon-reload"
     echo "  sudo systemctl enable ${service_name}.service"
     echo "  sudo systemctl start ${service_name}.service"
-    echo ""
-    echo "To check service status:"
-    echo "  sudo systemctl status ${service_name}.service"
-    echo ""
-    echo "To view logs:"
-    echo "  sudo journalctl -u ${service_name}.service -f"
-    echo "========================================================================"
 }
 
-# Function to create consensus client service
 create_consensus_service() {
     local service_name="lighthouse-node"
     local user=$(whoami)
     local script_dir=$(dirname $(readlink -f "$0"))
-    
-    # Create systemd service file for Lighthouse
+
     cat > "${script_dir}/${service_name}.service" <<EOL
 [Unit]
 Description=Lighthouse Ethereum Consensus Client
-After=network.target reth-node.service
+After=network.target geth-node.service
 Wants=network-online.target
 
 [Service]
@@ -141,23 +118,19 @@ RestartSec=10
 [Install]
 WantedBy=multi-user.target
 EOL
-    
-    echo "========================================================================"
-    echo "Lighthouse consensus client service file created at ${script_dir}/${service_name}.service"
-    echo ""
-    echo "To install the service, run:"
+
+    echo "Consensus service created: ${script_dir}/${service_name}.service"
+    echo "To enable it:"
     echo "  sudo cp ${script_dir}/${service_name}.service /etc/systemd/system/"
     echo "  sudo systemctl daemon-reload"
     echo "  sudo systemctl enable ${service_name}.service"
     echo "  sudo systemctl start ${service_name}.service"
-    echo "========================================================================"
 }
 
 # ======================================================================
-# Script Logic - You generally shouldn't need to modify below this line
+# Script Logic
 # ======================================================================
 
-# Process command line arguments
 if [ "$1" = "--create-service" ]; then
     create_systemd_service
     exit 0
@@ -166,99 +139,89 @@ elif [ "$1" = "--create-consensus-service" ]; then
     exit 0
 elif [ "$1" = "--help" ]; then
     echo "Usage: $0 [OPTION]"
-    echo "  --create-service          Create systemd service file for Reth node"
-    echo "  --create-consensus-service Create systemd service file for consensus client"
-    echo "  --help                    Display this help message"
+    echo "  --create-service          Create systemd service file for Geth node"
+    echo "  --create-consensus-service Create systemd service for Lighthouse"
+    echo "  --help                    Show this help message"
     exit 0
 fi
 
-# Create the data directory if it doesn't exist
-mkdir -p "$DATA_DIR/$CHAIN"
-
-# Generate JWT secret if it doesn't exist
+mkdir -p "$GETH_DATA_DIR/$GETH_CHAIN"
 generate_jwt_secret
 
-# Check if reth is installed
-if ! command -v reth &> /dev/null; then
-    echo "Error: reth is not installed or not in PATH"
-    echo "Please install reth first: https://reth.rs/installation/installation.html"
+if ! command -v geth &> /dev/null; then
+    echo "Error: geth not installed or not in PATH"
     exit 1
 fi
 
-# Build command based on configuration
-CMD="reth node --datadir \"$DATA_DIR\" --chain $CHAIN"
+CMD="geth --datadir \"$GETH_DATA_DIR\" --networkid 1"
 
-# Add HTTP RPC options if enabled
+# Add sync mode
+if [ "$GETH_NODE_TYPE" = "archive" ]; then
+    CMD="$CMD --syncmode=snap --gcmode=archive"
+else
+    CMD="$CMD --syncmode=snap --gcmode=full"
+fi
+
+# Add RPC options
 if [ "$ENABLE_HTTP" = "true" ]; then
     CMD="$CMD --http --http.addr \"$HTTP_ADDR\" --http.port \"$HTTP_PORT\" --http.api \"$HTTP_API\""
-    
-    if [ -n "$HTTP_CORSDOMAIN" ]; then
-        CMD="$CMD --http.corsdomain \"$HTTP_CORSDOMAIN\""
-    fi
+    [ -n "$HTTP_CORSDOMAIN" ] && CMD="$CMD --http.corsdomain \"$HTTP_CORSDOMAIN\""
 fi
 
-# Add WebSocket RPC options if enabled
 if [ "$ENABLE_WS" = "true" ]; then
     CMD="$CMD --ws --ws.addr \"$WS_ADDR\" --ws.port \"$WS_PORT\" --ws.api \"$WS_API\""
-    
-    if [ -n "$WS_ORIGINS" ]; then
-        CMD="$CMD --ws.origins \"$WS_ORIGINS\""
-    fi
+    [ -n "$WS_ORIGINS" ] && CMD="$CMD --ws.origins \"$WS_ORIGINS\""
 fi
 
-# Add Auth RPC options for consensus layer connection
+# Auth RPC for consensus
 CMD="$CMD --authrpc.addr \"$AUTH_ADDR\" --authrpc.port \"$AUTH_PORT\" --authrpc.jwtsecret \"$JWT_SECRET\""
 
-# Add logging options
-CMD="$CMD --verbosity \"$LOG_LEVEL\""
+# P2P config
+CMD="$CMD --port \"$DISCOVERY_PORT\" --maxpeers \"$MAX_PEERS\""
 
-# P2P networking options
-CMD="$CMD --discovery.port \"$DISCOVERY_PORT\""
+# Logging level
+CMD="$CMD --verbosity $LOG_LEVEL"
 
-# Add node type
-if [ "$NODE_TYPE" = "full" ]; then
-    CMD="$CMD --full"
-fi
-
-# Print configuration summary
+# Start node
 echo "==================================================================="
-echo "Starting Reth $CHAIN node in $NODE_TYPE mode"
+echo "Starting Geth $GETH_CHAIN node in $GETH_NODE_TYPE mode"
 echo "==================================================================="
-echo "Data directory: $DATA_DIR"
+echo "Data directory: $GETH_DATA_DIR"
 echo "JWT Secret: $JWT_SECRET"
-
-if [ "$ENABLE_HTTP" = "true" ]; then
-    echo "HTTP RPC: Enabled at http://$HTTP_ADDR:$HTTP_PORT"
-    echo "HTTP APIs: $HTTP_API"
-else
-    echo "HTTP RPC: Disabled"
-fi
-
-if [ "$ENABLE_WS" = "true" ]; then
-    echo "WebSocket: Enabled at ws://$WS_ADDR:$WS_PORT"
-    echo "WS APIs: $WS_API"
-else
-    echo "WebSocket: Disabled"
-fi
-
+[ "$ENABLE_HTTP" = "true" ] && echo "HTTP RPC: http://$HTTP_ADDR:$HTTP_PORT"
+[ "$ENABLE_WS" = "true" ] && echo "WebSocket: ws://$WS_ADDR:$WS_PORT"
 echo "Engine API: http://$AUTH_ADDR:$AUTH_PORT"
 echo "Discovery Port: $DISCOVERY_PORT"
 echo "Log Level: $LOG_LEVEL"
 echo "==================================================================="
-echo "Remember: You need to run a consensus client to sync with the network!"
-echo "Example: lighthouse bn --checkpoint-sync-url https://mainnet.checkpoint.sigp.io \\"
-echo "                       --execution-endpoint http://$AUTH_ADDR:$AUTH_PORT \\"
-echo "                       --execution-jwt \"$JWT_SECRET\""
+echo "Reminder: Run a consensus client (e.g., Lighthouse) alongside Geth"
 echo "==================================================================="
-echo "TIP: Run with --create-service to create a systemd service file"
-echo "TIP: Run with --create-consensus-service to create a consensus client service file"
-echo "==================================================================="
-echo "Starting node..."
-echo "Press Ctrl+C to stop"
-echo ""
 
-# Execute the command
 eval $CMD
 
-# Note: The script will continue running until the node is terminated
-# To stop, press Ctrl+C 
+
+# Run Lighthouse
+# Ensure Lighthouse systemd service is created and started properly
+# Ensure the JWT file is accessible for both Geth and Lighthouse
+
+# Run RETH: ./run_reth_node.sh --create-service
+# Run Lighthouse (consensus client) ./run_reth_node.sh --create-consensus-service
+
+# sudo journalctl -u geth-node.service -n 100
+# sudo journalctl -u lighthouse-node.service -n 100
+
+# Run RETH: ./run_reth_node.sh --create-service
+# Run Lighthouse (consensus client) ./run_reth_node.sh --create-consensus-service
+
+# sudo journalctl -u reth-node.service -n 100
+# sudo journalctl -u lighthouse-node.service -n 100
+
+
+# Starting Geth...
+# Geth started. Logs: /root/geth-logs/geth.log
+# Starting Lighthouse...
+# Lighthouse started. Logs: /root/lighthouse-logs/lighthouse.log
+# ==========================================================
+#  Both Geth (Execution) and Lighthouse (Consensus) started
+#  Beacon Chain architecture is now active on mainnet
+# ==========================================================
