@@ -10,12 +10,12 @@
 # Configuration Variables - Customize these as needed
 # ======================================================================
 
-# Geth Configuration
-GETH_DATA_DIR="/root/geth"
-GETH_LOG_DIR="/root/geth-logs"
-GETH_CHAIN="mainnet"
-GETH_NODE_TYPE="full"  # Options: full, archive
+# Node Configuration
+DATA_DIR="$HOME/.local/share/reth"
+CHAIN="mainnet"  # Options: mainnet, sepolia, holesky, hoodi, dev
+NODE_TYPE="archive"  # Options: archive, full
 
+# RPC Configuration
 ENABLE_HTTP="true"
 HTTP_ADDR="127.0.0.1"
 HTTP_PORT="8545"
@@ -35,11 +35,7 @@ JWT_SECRET="$GETH_DATA_DIR/$GETH_CHAIN/jwt.hex"
 LOG_LEVEL="3"  # 0 = panic, 1 = fatal, 2 = error, 3 = warn, 4 = info, 5 = debug, 6 = detail, 7 = trace
 
 DISCOVERY_PORT="30303"
-MAX_PEERS="50"
-
-# Lighthouse Configuration
-LIGHTHOUSE_DATA_DIR="/root/lighthouse"
-LIGHTHOUSE_LOG_DIR="/root/lighthouse-logs"
+MAX_PEERS="50"  # Total peers will be split between inbound and outbound
 
 # ======================================================================
 # Functions
@@ -118,13 +114,16 @@ RestartSec=10
 [Install]
 WantedBy=multi-user.target
 EOL
-
-    echo "Consensus service created: ${script_dir}/${service_name}.service"
-    echo "To enable it:"
+    
+    echo "========================================================================"
+    echo "Lighthouse consensus client service file created at ${script_dir}/${service_name}.service"
+    echo ""
+    echo "To install the service, run:"
     echo "  sudo cp ${script_dir}/${service_name}.service /etc/systemd/system/"
     echo "  sudo systemctl daemon-reload"
     echo "  sudo systemctl enable ${service_name}.service"
     echo "  sudo systemctl start ${service_name}.service"
+    echo "========================================================================"
 }
 
 # ======================================================================
@@ -199,29 +198,5 @@ echo "==================================================================="
 
 eval $CMD
 
-
-# Run Lighthouse
-# Ensure Lighthouse systemd service is created and started properly
-# Ensure the JWT file is accessible for both Geth and Lighthouse
-
-# Run RETH: ./run_reth_node.sh --create-service
-# Run Lighthouse (consensus client) ./run_reth_node.sh --create-consensus-service
-
-# sudo journalctl -u geth-node.service -n 100
-# sudo journalctl -u lighthouse-node.service -n 100
-
-# Run RETH: ./run_reth_node.sh --create-service
-# Run Lighthouse (consensus client) ./run_reth_node.sh --create-consensus-service
-
-# sudo journalctl -u reth-node.service -n 100
-# sudo journalctl -u lighthouse-node.service -n 100
-
-
-# Starting Geth...
-# Geth started. Logs: /root/geth-logs/geth.log
-# Starting Lighthouse...
-# Lighthouse started. Logs: /root/lighthouse-logs/lighthouse.log
-# ==========================================================
-#  Both Geth (Execution) and Lighthouse (Consensus) started
-#  Beacon Chain architecture is now active on mainnet
-# ==========================================================
+# Note: The script will continue running until the node is terminated
+# To stop, press Ctrl+C 
