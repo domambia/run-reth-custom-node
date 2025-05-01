@@ -13,10 +13,11 @@
 # Configuration Variables - Customize these as needed
 # ======================================================================
 
-# Node Configuration
-DATA_DIR="$HOME/.local/share/reth"
-CHAIN="mainnet"  # Options: mainnet, sepolia, holesky, hoodi, dev
-NODE_TYPE="archive"  # Options: archive, full
+# Reth Node Configuration
+RETH_DATA_DIR="/home/pexilabs/externals/nodes-apps/run-reth-custom-node/reth"
+RETH_LOG_DIR="/home/pexilabs/externals/nodes-apps/run-reth-custom-node/reth-logs"
+RETH_CHAIN="mainnet"  # Options: mainnet, sepolia, holesky, hoodi, dev
+RETH_NODE_TYPE="archive"  # Options: archive, full
 
 # RPC Configuration
 ENABLE_HTTP="true"
@@ -35,7 +36,7 @@ WS_ORIGINS="*"  # Use "*" to allow all origins or a comma-separated list
 # Auth RPC Configuration (for Consensus Layer connection)
 AUTH_ADDR="127.0.0.1"
 AUTH_PORT="8551"
-JWT_SECRET="$DATA_DIR/$CHAIN/jwt.hex"
+JWT_SECRET="$RETH_DATA_DIR/$RETH_CHAIN/jwt.hex"
 
 # Logging Configuration
 LOG_LEVEL="info"  # Options: error, warn, info, debug, trace
@@ -43,6 +44,10 @@ LOG_LEVEL="info"  # Options: error, warn, info, debug, trace
 # P2P Network Configuration
 DISCOVERY_PORT="30303"
 MAX_PEERS="50"  # Total peers will be split between inbound and outbound
+
+# Lighthouse Configuration
+LIGHTHOUSE_DATA_DIR="/home/pexilabs/externals/nodes-apps/run-lighthouse-custom-node/lighthouse"
+LIGHTHOUSE_LOG_DIR="/home/pexilabs/externals/nodes-apps/run-lighthouse-custom-node/lighthouse-logs"
 
 # ======================================================================
 # Functions
@@ -76,7 +81,7 @@ create_systemd_service() {
     local script_path=$(readlink -f "$0")
     local script_dir=$(dirname "$script_path")
     
-    # Create systemd service file
+    # Create systemd service file for Reth Node
     cat > "${script_dir}/${service_name}.service" <<EOL
 [Unit]
 Description=Reth Ethereum Node
@@ -173,7 +178,7 @@ elif [ "$1" = "--help" ]; then
 fi
 
 # Create the data directory if it doesn't exist
-mkdir -p "$DATA_DIR/$CHAIN"
+mkdir -p "$RETH_DATA_DIR/$RETH_CHAIN"
 
 # Generate JWT secret if it doesn't exist
 generate_jwt_secret
@@ -186,7 +191,7 @@ if ! command -v reth &> /dev/null; then
 fi
 
 # Build command based on configuration
-CMD="reth node --datadir \"$DATA_DIR\" --chain $CHAIN"
+CMD="reth node --datadir \"$RETH_DATA_DIR\" --chain $RETH_CHAIN"
 
 # Add HTTP RPC options if enabled
 if [ "$ENABLE_HTTP" = "true" ]; then
@@ -210,21 +215,25 @@ fi
 CMD="$CMD --authrpc.addr \"$AUTH_ADDR\" --authrpc.port \"$AUTH_PORT\" --authrpc.jwtsecret \"$JWT_SECRET\""
 
 # Add logging options
-CMD="$CMD --verbosity \"$LOG_LEVEL\""
+# Set logging level using environment variable
+export RUST_LOG="$LOG_LEVEL"
+
+# Execute the command
+eval $CMD
 
 # P2P networking options
 CMD="$CMD --discovery.port \"$DISCOVERY_PORT\""
 
 # Add node type
-if [ "$NODE_TYPE" = "full" ]; then
+if [ "$RETH_NODE_TYPE" = "full" ]; then
     CMD="$CMD --full"
 fi
 
 # Print configuration summary
 echo "==================================================================="
-echo "Starting Reth $CHAIN node in $NODE_TYPE mode"
+echo "Starting Reth $RETH_CHAIN node in $RETH_NODE_TYPE mode"
 echo "==================================================================="
-echo "Data directory: $DATA_DIR"
+echo "Data directory: $RETH_DATA_DIR"
 echo "JWT Secret: $JWT_SECRET"
 
 if [ "$ENABLE_HTTP" = "true" ]; then
@@ -260,5 +269,9 @@ echo ""
 # Execute the command
 eval $CMD
 
-# Note: The script will continue running until the node is terminated
-# To stop, press Ctrl+C 
+
+# Run RETH: ./run_reth_node.sh --create-service
+# Run Lighthouse (consensus client) ./run_reth_node.sh --create-consensus-service
+
+# sudo journalctl -u reth-node.service -n 100
+# sudo journalctl -u lighthouse-node.service -n 100
