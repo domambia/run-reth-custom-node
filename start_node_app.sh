@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # ===============================================================
-# Launch Geth + Lighthouse with Minimal Storage Usage (<= 200GB)
+# Launch Geth + Lighthouse with Minimal Storage Usage
 # ===============================================================
 
 # Geth Configuration
 GETH_DATA_DIR="/root/geth"
 GETH_LOG_DIR="/root/geth-logs"
 GETH_CHAIN="mainnet"
-GETH_NODE_TYPE="full"
+GETH_NODE_TYPE="full"  # Must be "full" for minimal storage
 
 ENABLE_HTTP="true"
 HTTP_ADDR="127.0.0.1"
@@ -61,7 +61,6 @@ GETH_CMD=(
   --authrpc.jwtsecret "$JWT_SECRET"
   --syncmode=snap
   --gcmode=full
-  --state.scheme=path
 )
 
 if [ "$ENABLE_HTTP" = "true" ]; then
@@ -90,7 +89,7 @@ LIGHTHOUSE_CMD=(
   --checkpoint-sync-url https://mainnet.checkpoint.sigp.io
   --metrics
   --validator-monitor-auto
-  --prune-payloads
+    --prune-payloads true
   --slots-per-restore-point 8192
 )
 
@@ -105,5 +104,4 @@ echo "=========================================================="
 echo " Geth (Execution) and Lighthouse (Consensus) are running"
 echo " ✅ Synced from latest snapshot and checkpoint only"
 echo " ✅ Minimal storage usage enabled (no full history)"
-echo " ✅ Estimated disk usage: ~150–165GB"
 echo "=========================================================="
