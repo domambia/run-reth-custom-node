@@ -12,11 +12,12 @@
 # - Monitor disk usage and prune logs regularly
 # ======================================================================
 
+
 # Configuration Variables - Customize these as needed
 # ======================================================================
 
 # Node Configuration
-RETH_DATA_DIR="$HOME/.local/share/reth"
+RETH_DATA_DIR="$HOME/.local/share/reth" # TODO: change this as per your system directory structure
 CHAIN="mainnet"  # Options: mainnet, sepolia, holesky, hoodi, dev
 RETH_NODE_TYPE="full"  # Options: archive, full. Use 'full' for minimal storage (default)
 
@@ -40,6 +41,101 @@ JWT_SECRET="$RETH_DATA_DIR/$CHAIN/jwt.hex"
 LOG_LEVEL="info"  # Reth log levels: error, warn, info, debug, trace
 DISCOVERY_PORT="30303"
 MAX_PEERS="50"
+
+# Ensure Reth is installed, or install it if missing
+if ! command -v reth &> /dev/null; then
+    echo "'reth' not found. Installing dependencies and building Reth from source..."
+    # Detect OS
+    OS="$(uname -s)"
+    if [ "$OS" = "Darwin" ]; then
+        echo "Detected macOS. Installing dependencies with Homebrew..."
+        if ! command -v brew &> /dev/null; then
+            echo "Homebrew not found. Please install Homebrew first: https://brew.sh/"
+            exit 1
+        fi
+        brew install llvm pkg-config
+    elif [ "$OS" = "Linux" ]; then
+        if [ -f "/etc/lsb-release" ] || [ -f "/etc/debian_version" ]; then
+            echo "Detected Ubuntu/Debian. Installing dependencies with apt-get..."
+            sudo apt-get update
+            sudo apt-get install -y libclang-dev pkg-config build-essential
+        else
+            echo "Unsupported Linux distribution. Please install libclang-dev, pkg-config, and build-essential manually."
+            exit 1
+        fi
+    else
+        echo "Unsupported OS: $OS. Please install Reth manually."
+        exit 1
+    fi
+    # Install Rust
+    if ! command -v cargo &> /dev/null; then
+        echo "Installing Rust using rustup..."
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        source "$HOME/.cargo/env"
+    fi
+    # Ensure Rust is up to date
+    rustup update
+    # Clone and build Reth
+    if [ ! -d "$HOME/reth" ]; then
+        echo "Cloning Reth repository..."
+        git clone https://github.com/paradigmxyz/reth "$HOME/reth"
+    fi
+    cd "$HOME/reth"
+    echo "Building and installing Reth... (this may take several minutes)"
+    cargo install --locked --path bin/reth --bin reth
+    cd -
+    if ! command -v reth &> /dev/null; then
+        echo "Reth installation failed. Please check the output above for errors."
+        exit 1
+    fi
+    echo "Reth installed successfully!"
+fi
+
+# Ensure Lighthouse is installed, or install it if missing
+if ! command -v lighthouse &> /dev/null; then
+    echo "'lighthouse' not found. Installing Lighthouse pre-built binary..."
+    # Detect OS and architecture
+    OS="$(uname -s)"
+    ARCH="$(uname -m)"
+    LH_VERSION="v4.0.1" # You can update this to the latest version as needed
+    if [ "$OS" = "Darwin" ]; then
+        if [ "$ARCH" = "x86_64" ]; then
+            echo "Detected macOS x86_64. Downloading Lighthouse..."
+            cd ~
+            curl -LO https://github.com/sigp/lighthouse/releases/download/${LH_VERSION}/lighthouse-${LH_VERSION}-x86_64-apple-darwin.tar.gz
+            tar -xvf lighthouse-${LH_VERSION}-x86_64-apple-darwin.tar.gz
+            sudo cp lighthouse /usr/local/bin/
+            rm -f lighthouse-${LH_VERSION}-x86_64-apple-darwin.tar.gz
+            echo "Lighthouse installed to /usr/local/bin/lighthouse"
+        else
+            echo "Unsupported macOS architecture: $ARCH. Please install Lighthouse manually."
+            exit 1
+        fi
+    elif [ "$OS" = "Linux" ]; then
+        if [ "$ARCH" = "x86_64" ]; then
+            echo "Detected Linux x86_64. Downloading Lighthouse..."
+            cd ~
+            curl -LO https://github.com/sigp/lighthouse/releases/download/${LH_VERSION}/lighthouse-${LH_VERSION}-x86_64-unknown-linux-gnu.tar.gz
+            tar -xvf lighthouse-${LH_VERSION}-x86_64-unknown-linux-gnu.tar.gz
+            sudo cp lighthouse /usr/local/bin/
+            rm -f lighthouse-${LH_VERSION}-x86_64-unknown-linux-gnu.tar.gz
+            echo "Lighthouse installed to /usr/local/bin/lighthouse"
+        else
+            echo "Unsupported Linux architecture: $ARCH. Please install Lighthouse manually."
+            exit 1
+        fi
+    else
+        echo "Unsupported OS: $OS. Please install Lighthouse manually."
+        exit 1
+    fi
+    if ! command -v lighthouse &> /dev/null; then
+        echo "Lighthouse installation failed. Please check the output above for errors."
+        exit 1
+    fi
+    echo "Lighthouse installed successfully!"
+fi
+
+
 
 # ======================================================================
 # Functions
@@ -123,7 +219,9 @@ ExecStart=${lighthouse_bin} bn \\
     --execution-endpoint http://${AUTH_ADDR}:${AUTH_PORT} \\
     --execution-jwt ${JWT_SECRET} \\
     --metrics \\
-    --validator-monitor-auto
+    --validator-monitor-auto \\
+    --prune-payloads true \\
+    --slots-per-restore-point 8192
 Restart=on-failure
 RestartSec=10
 
