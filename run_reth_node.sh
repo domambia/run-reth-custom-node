@@ -1,19 +1,24 @@
 #!/bin/bash
 
 # ======================================================================
-# Geth Ethereum Node and Lighthouse Consensus Client Runner Script
+# Reth + Lighthouse Node Runner Script (Low Storage Edition)
 # ======================================================================
-# This script runs a Geth node on Ethereum mainnet and a Lighthouse consensus client.
-# Customize the parameters below as needed.
+# This script configures Reth (execution) and Lighthouse (consensus) clients
+# for Ethereum mainnet, optimized for machines with limited storage (~200GB).
+#
+# - Runs Reth as a full node (no archive/history, minimal storage usage)
+# - Lighthouse syncs from a recent checkpoint (not from genesis)
+# - Suitable for non-validator, non-archive use
+# - Monitor disk usage and prune logs regularly
 # ======================================================================
 
 # Configuration Variables - Customize these as needed
 # ======================================================================
 
 # Node Configuration
-DATA_DIR="$HOME/.local/share/reth"
+RETH_DATA_DIR="$HOME/.local/share/reth"
 CHAIN="mainnet"  # Options: mainnet, sepolia, holesky, hoodi, dev
-NODE_TYPE="archive"  # Options: archive, full
+RETH_NODE_TYPE="full"  # Options: archive, full. Use 'full' for minimal storage (default)
 
 # RPC Configuration
 ENABLE_HTTP="true"
@@ -30,12 +35,11 @@ WS_ORIGINS="*"
 
 AUTH_ADDR="127.0.0.1"
 AUTH_PORT="8551"
-JWT_SECRET="$GETH_DATA_DIR/$GETH_CHAIN/jwt.hex"
+JWT_SECRET="$RETH_DATA_DIR/$CHAIN/jwt.hex"
 
-LOG_LEVEL="3"  # 0 = panic, 1 = fatal, 2 = error, 3 = warn, 4 = info, 5 = debug, 6 = detail, 7 = trace
-
+LOG_LEVEL="info"  # Reth log levels: error, warn, info, debug, trace
 DISCOVERY_PORT="30303"
-MAX_PEERS="50"  # Total peers will be split between inbound and outbound
+MAX_PEERS="50"
 
 # ======================================================================
 # Functions
@@ -55,22 +59,33 @@ generate_jwt_secret() {
     fi
 }
 
-create_systemd_service() {
-    local service_name="geth-node"
+create_reth_service() {
+    local service_name="reth-node"
     local user=$(whoami)
-    local script_path=$(readlink -f "$0")
-    local script_dir=$(dirname "$script_path")
+    local script_dir=$(dirname $(readlink -f "$0"))
+    local reth_bin=$(command -v reth || echo "/usr/local/bin/reth")
 
     cat > "${script_dir}/${service_name}.service" <<EOL
 [Unit]
-Description=Geth Ethereum Node
+Description=Reth Ethereum Execution Client
 After=network.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=${user}
-ExecStart=${script_path}
+ExecStart=${reth_bin} node \\
+    --datadir ${RETH_DATA_DIR} \\
+    --chain ${CHAIN} \\
+    --port ${DISCOVERY_PORT} \\
+    --maxpeers ${MAX_PEERS} \\
+    --authrpc.addr ${AUTH_ADDR} \\
+    --authrpc.port ${AUTH_PORT} \\
+    --authrpc.jwtsecret ${JWT_SECRET} \\
+    $( [ "$RETH_NODE_TYPE" = "full" ] && echo "--full" ) \\
+    $( [ "$ENABLE_HTTP" = "true" ] && echo "--http --http.addr ${HTTP_ADDR} --http.port ${HTTP_PORT} --http.api ${HTTP_API} --http.corsdomain ${HTTP_CORSDOMAIN}" ) \\
+    $( [ "$ENABLE_WS" = "true" ] && echo "--ws --ws.addr ${WS_ADDR} --ws.port ${WS_PORT} --ws.api ${WS_API} --ws.origins ${WS_ORIGINS}" ) \\
+    --log.level ${LOG_LEVEL}
 Restart=on-failure
 RestartSec=10
 LimitNOFILE=1000000
@@ -92,17 +107,18 @@ create_consensus_service() {
     local service_name="lighthouse-node"
     local user=$(whoami)
     local script_dir=$(dirname $(readlink -f "$0"))
+    local lighthouse_bin=$(command -v lighthouse || echo "/usr/local/bin/lighthouse")
 
     cat > "${script_dir}/${service_name}.service" <<EOL
 [Unit]
 Description=Lighthouse Ethereum Consensus Client
-After=network.target geth-node.service
+After=network.target reth-node.service
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=${user}
-ExecStart=/usr/local/bin/lighthouse bn \\
+ExecStart=${lighthouse_bin} bn \\
     --checkpoint-sync-url https://mainnet.checkpoint.sigp.io \\
     --execution-endpoint http://${AUTH_ADDR}:${AUTH_PORT} \\
     --execution-jwt ${JWT_SECRET} \\
@@ -131,72 +147,29 @@ EOL
 # ======================================================================
 
 if [ "$1" = "--create-service" ]; then
-    create_systemd_service
+    create_reth_service
     exit 0
 elif [ "$1" = "--create-consensus-service" ]; then
     create_consensus_service
     exit 0
 elif [ "$1" = "--help" ]; then
     echo "Usage: $0 [OPTION]"
-    echo "  --create-service          Create systemd service file for Geth node"
+    echo "  --create-service          Create systemd service file for Reth node"
     echo "  --create-consensus-service Create systemd service for Lighthouse"
     echo "  --help                    Show this help message"
     exit 0
 fi
 
-mkdir -p "$GETH_DATA_DIR/$GETH_CHAIN"
+mkdir -p "$RETH_DATA_DIR/$CHAIN"
 generate_jwt_secret
 
-if ! command -v geth &> /dev/null; then
-    echo "Error: geth not installed or not in PATH"
-    exit 1
-fi
-
-CMD="geth --datadir \"$GETH_DATA_DIR\" --networkid 1"
-
-# Add sync mode
-if [ "$GETH_NODE_TYPE" = "archive" ]; then
-    CMD="$CMD --syncmode=snap --gcmode=archive"
-else
-    CMD="$CMD --syncmode=snap --gcmode=full"
-fi
-
-# Add RPC options
-if [ "$ENABLE_HTTP" = "true" ]; then
-    CMD="$CMD --http --http.addr \"$HTTP_ADDR\" --http.port \"$HTTP_PORT\" --http.api \"$HTTP_API\""
-    [ -n "$HTTP_CORSDOMAIN" ] && CMD="$CMD --http.corsdomain \"$HTTP_CORSDOMAIN\""
-fi
-
-if [ "$ENABLE_WS" = "true" ]; then
-    CMD="$CMD --ws --ws.addr \"$WS_ADDR\" --ws.port \"$WS_PORT\" --ws.api \"$WS_API\""
-    [ -n "$WS_ORIGINS" ] && CMD="$CMD --ws.origins \"$WS_ORIGINS\""
-fi
-
-# Auth RPC for consensus
-CMD="$CMD --authrpc.addr \"$AUTH_ADDR\" --authrpc.port \"$AUTH_PORT\" --authrpc.jwtsecret \"$JWT_SECRET\""
-
-# P2P config
-CMD="$CMD --port \"$DISCOVERY_PORT\" --maxpeers \"$MAX_PEERS\""
-
-# Logging level
-CMD="$CMD --verbosity $LOG_LEVEL"
-
-# Start node
 echo "==================================================================="
-echo "Starting Geth $GETH_CHAIN node in $GETH_NODE_TYPE mode"
-echo "==================================================================="
-echo "Data directory: $GETH_DATA_DIR"
-echo "JWT Secret: $JWT_SECRET"
-[ "$ENABLE_HTTP" = "true" ] && echo "HTTP RPC: http://$HTTP_ADDR:$HTTP_PORT"
-[ "$ENABLE_WS" = "true" ] && echo "WebSocket: ws://$WS_ADDR:$WS_PORT"
-echo "Engine API: http://$AUTH_ADDR:$AUTH_PORT"
-echo "Discovery Port: $DISCOVERY_PORT"
-echo "Log Level: $LOG_LEVEL"
-echo "==================================================================="
-echo "Reminder: Run a consensus client (e.g., Lighthouse) alongside Geth"
+echo "Reminder: Use the systemd service files to run Reth and Lighthouse as background services."
+echo "To create them, run:"
+echo "  $0 --create-service"
+echo "  $0 --create-consensus-service"
 echo "==================================================================="
 
-eval $CMD
-
-# Note: The script will continue running until the node is terminated
-# To stop, press Ctrl+C 
+echo "You can also run Reth manually with:"
+echo "reth node --datadir $RETH_DATA_DIR --chain $CHAIN $( [ "$RETH_NODE_TYPE" = "full" ] && echo "--full" ) --authrpc.jwtsecret $JWT_SECRET --authrpc.addr $AUTH_ADDR --authrpc.port $AUTH_PORT $( [ "$ENABLE_HTTP" = "true" ] && echo "--http --http.addr $HTTP_ADDR --http.port $HTTP_PORT --http.api $HTTP_API --http.corsdomain $HTTP_CORSDOMAIN" ) $( [ "$ENABLE_WS" = "true" ] && echo "--ws --ws.addr $WS_ADDR --ws.port $WS_PORT --ws.api $WS_API --ws.origins $WS_ORIGINS" ) --log.level $LOG_LEVEL"
+echo "===================================================================" 
